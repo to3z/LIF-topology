@@ -37,30 +37,31 @@ cfg_fc = [512, 50]
 
 class lif_1_3(nn.Module):
     """
-    1+3 LIF topology (conv variant, alternative to LIF_hh's 3+1).
+    1+3 LIF topology (conv variant, mem-mixing, LIF_hh style).
 
     Forward flow at each timestep:
-        input -> conv_in -> stage-1 LIF (slot 0) -> spike0
-                                                  |
-                          +---------+-------------+-----------+
-                          |         |             |
-                      conv_a     conv_b        conv_c
-                          |         |             |
-                      stage-2    stage-2       stage-2
-                      LIF (1)    LIF (2)       LIF (3)
+        input -> conv_in -> stage-1 LIF (slot 0) -> mem_0
+                                                       |
+                                  lif_fc(mem_0)  (Linear(1, 3), abs weight, per-channel)
+                                                       |
+                            +----------+--------------+
+                            |          |              |
+                       stage-2    stage-2        stage-2
+                       LIF (1)    LIF (2)        LIF (3)
+
+    The 3 stage-2 LIFs do not see `input` directly; they only see the
+    stage-1 LIF's mem through a small non-negative per-channel mixing
+    matrix.
     """
     def __init__(self, in_planes, out_planes, kernel_size, stride, padding):
         super(lif_1_3, self).__init__()
-        # Stage 1: 1 LIF, 1 conv on the (summed) input
+        # 1 primary LIF (1 conv on the (summed) input)
         self.conv_in = nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size,
                                  stride=stride, padding=padding).to(device)
-        # Stage 2: 3 parallel LIFs, each conv on spike0
-        self.conv_a = nn.Conv2d(out_planes, out_planes, kernel_size=kernel_size,
-                                stride=stride, padding=padding).to(device)
-        self.conv_b = nn.Conv2d(out_planes, out_planes, kernel_size=kernel_size,
-                                stride=stride, padding=padding).to(device)
-        self.conv_c = nn.Conv2d(out_planes, out_planes, kernel_size=kernel_size,
-                                stride=stride, padding=padding).to(device)
+        # 1 mixing layer producing 3 input currents (one per stage-2 LIF)
+        # Linear (not Conv) because the mixing is per-channel only.
+        self.lif_fc = nn.Linear(1, 3).to(device)
+        self.lif_fc.weight.data = abs(self.lif_fc.weight.data)
 
     def forward(self, input, mem, spike, is_spike_input=True):
         """
@@ -71,7 +72,7 @@ class lif_1_3(nn.Module):
                 (raw conv input, e.g. image)
         mem, spike: 5D [batch, C', H', W', 4]
         """
-        # ---- Stage 1: 1 LIF from the input ----
+        # ---- Stage 1: 1 primary LIF from the input ----
         if is_spike_input:
             in0 = (self.conv_in(input[:,:,:,:,0])
                    + self.conv_in(input[:,:,:,:,1])
@@ -81,15 +82,14 @@ class lif_1_3(nn.Module):
             in0 = self.conv_in(input)
         mem0, spike0 = mem_update(in0, mem[:,:,:,:,0], spike[:,:,:,:,0])
 
-        # ---- Stage 2: 3 LIFs from spike0 ----
-        in_a = self.conv_a(spike0)
-        in_b = self.conv_b(spike0)
-        in_c = self.conv_c(spike0)
-        mem_a, spike_a = mem_update(in_a, mem[:,:,:,:,1], spike[:,:,:,:,1])
-        mem_b, spike_b = mem_update(in_b, mem[:,:,:,:,2], spike[:,:,:,:,2])
-        mem_c, spike_c = mem_update(in_c, mem[:,:,:,:,3], spike[:,:,:,:,3])
+        # ---- Stage 2: 3 mixing LIFs from mem_0 ----
+        # mem[:,:,:,:,0:1] is 5D [batch, C', H', W', 1]; lif_fc mixes the
+        # last dim, producing 5D [batch, C', H', W', 3].
+        inner = self.lif_fc(mem[:,:,:,:,0:1])
+        mem_a, spike_a = mem_update(inner[:,:,:,:,0], mem[:,:,:,:,1], spike[:,:,:,:,1])
+        mem_b, spike_b = mem_update(inner[:,:,:,:,1], mem[:,:,:,:,2], spike[:,:,:,:,2])
+        mem_c, spike_c = mem_update(inner[:,:,:,:,2], mem[:,:,:,:,3], spike[:,:,:,:,3])
 
-        # Out-of-place stack to avoid in-place autograd issues
         mem_new = torch.stack([mem0, mem_a, mem_b, mem_c], dim=-1)
         spike_new = torch.stack([spike0, spike_a, spike_b, spike_c], dim=-1)
         return mem_new, spike_new
@@ -124,9 +124,7 @@ class SCNN_Model_LIF_1_3(nn.Module):
                                   device=device)
 
         for step in range(time_window):
-            # First layer: raw 4D image
             c1_mem, c1_spike = self.lif_4_1(input, c1_mem, c1_spike, is_spike_input=False)
-            # Pool each of the 4 slots separately
             x = torch.zeros(c1_spike.size(0), c1_spike.size(1),
                             c1_spike.size(2) // 2, c1_spike.size(3) // 2, 4,
                             device=device)
@@ -134,7 +132,6 @@ class SCNN_Model_LIF_1_3(nn.Module):
             x[:,:,:,:,1] = F.avg_pool2d(c1_spike[:,:,:,:,1], 2)
             x[:,:,:,:,2] = F.avg_pool2d(c1_spike[:,:,:,:,2], 2)
             x[:,:,:,:,3] = F.avg_pool2d(c1_spike[:,:,:,:,3], 2)
-            # Second layer: 5D pooled spike
             c2_mem, c2_spike = self.lif_4_2(x, c2_mem, c2_spike, is_spike_input=True)
             x = torch.zeros(c2_spike.size(0), c2_spike.size(1),
                             c2_spike.size(2) // 2, c2_spike.size(3) // 2, 4,

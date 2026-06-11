@@ -37,30 +37,33 @@ cfg_fc = [512, 50]
 
 class lif_2_2(nn.Module):
     """
-    2+2 LIF topology (conv variant).
+    2+2 LIF topology (conv variant, mem-mixing, LIF_hh style).
 
     Forward flow at each timestep:
-        input -> conv_a, conv_b -> stage-1 LIFs (slots 0, 1) -> spike_a, spike_b
-                                                                |
-                                            +-------------------+
-                                            |  (sum)
-                                        conv_c, conv_d
-                                            |
-                                       stage-2 LIFs
-                                       (slots 2, 3)
+        input -> conv_a, conv_b -> stage-1 LIFs (slots 0, 1) -> mem_a, mem_b
+                                                              |
+                              lif_fc(mem_a, mem_b)  (Linear(2, 2), abs weight, per-channel)
+                                                              |
+                            +---------------+
+                            |               |
+                       stage-2 LIF    stage-2 LIF
+                       (slot 2)       (slot 3)
+
+    The 2 stage-2 LIFs do not see `input` directly; they only see the
+    stage-1 LIFs' mems through a small non-negative per-channel mixing
+    matrix.
     """
     def __init__(self, in_planes, out_planes, kernel_size, stride, padding):
         super(lif_2_2, self).__init__()
-        # Stage 1: 2 parallel LIFs from the (summed) input
+        # 2 primary LIFs (2 convs on the (summed) input)
         self.conv_a = nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size,
                                 stride=stride, padding=padding).to(device)
         self.conv_b = nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size,
                                 stride=stride, padding=padding).to(device)
-        # Stage 2: 2 parallel LIFs from (spike_a + spike_b)
-        self.conv_c = nn.Conv2d(out_planes, out_planes, kernel_size=kernel_size,
-                                stride=stride, padding=padding).to(device)
-        self.conv_d = nn.Conv2d(out_planes, out_planes, kernel_size=kernel_size,
-                                stride=stride, padding=padding).to(device)
+        # 1 mixing layer producing 2 input currents (one per stage-2 LIF)
+        # Linear (not Conv) because the mixing is per-channel only.
+        self.lif_fc = nn.Linear(2, 2).to(device)
+        self.lif_fc.weight.data = abs(self.lif_fc.weight.data)
 
     def forward(self, input, mem, spike, is_spike_input=True):
         """
@@ -69,7 +72,7 @@ class lif_2_2(nn.Module):
             4D [batch, C, H, W]      when is_spike_input=False
         mem, spike: 5D [batch, C', H', W', 4]
         """
-        # ---- Stage 1: 2 LIFs from the input ----
+        # ---- Stage 1: 2 primary LIFs from the input ----
         if is_spike_input:
             in_a = (self.conv_a(input[:,:,:,:,0])
                     + self.conv_a(input[:,:,:,:,1])
@@ -85,12 +88,10 @@ class lif_2_2(nn.Module):
         mem_a, spike_a = mem_update(in_a, mem[:,:,:,:,0], spike[:,:,:,:,0])
         mem_b, spike_b = mem_update(in_b, mem[:,:,:,:,1], spike[:,:,:,:,1])
 
-        # ---- Stage 2: 2 LIFs from (spike_a + spike_b) ----
-        spike_sum = spike_a + spike_b
-        in_c = self.conv_c(spike_sum)
-        in_d = self.conv_d(spike_sum)
-        mem_c, spike_c = mem_update(in_c, mem[:,:,:,:,2], spike[:,:,:,:,2])
-        mem_d, spike_d = mem_update(in_d, mem[:,:,:,:,3], spike[:,:,:,:,3])
+        # ---- Stage 2: 2 mixing LIFs from (mem_a, mem_b) ----
+        inner = self.lif_fc(mem[:,:,:,:,0:2])  # [batch, C', H', W', 2]
+        mem_c, spike_c = mem_update(inner[:,:,:,:,0], mem[:,:,:,:,2], spike[:,:,:,:,2])
+        mem_d, spike_d = mem_update(inner[:,:,:,:,1], mem[:,:,:,:,3], spike[:,:,:,:,3])
 
         mem_new = torch.stack([mem_a, mem_b, mem_c, mem_d], dim=-1)
         spike_new = torch.stack([spike_a, spike_b, spike_c, spike_d], dim=-1)

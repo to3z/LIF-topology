@@ -37,34 +37,35 @@ cfg_fc = [512, 50]
 
 class lif_1_1_1_1(nn.Module):
     """
-    4-stage serial LIF topology (conv variant, no branching).
+    4-stage serial LIF topology (conv variant, mem-mixing, LIF_hh style).
 
     Forward flow at each timestep:
-        input -> conv_0 -> stage-1 LIF (slot 0) -> spike0
-                                                    |
-                                                  conv_1
-                                                    |
-                                                stage-2 LIF (slot 1) -> spike1
-                                                                            |
-                                                                          conv_2
-                                                                            |
-                                                                        stage-3 LIF (slot 2) -> spike2
-                                                                                                    |
-                                                                                                  conv_3
-                                                                                                    |
+        input -> conv_0 -> stage-1 LIF (slot 0) -> mem_0
+                                                          |
+                                       lif_fc1(mem_0)     (Linear(1, 1), abs weight, per-channel)
+                                                          |
+                                                     stage-2 LIF (slot 1) -> mem_1
+                                                                              |
+                                                       lif_fc2(mem_1)        (Linear(1, 1), abs weight, per-channel)
+                                                                              |
+                                                                          stage-3 LIF (slot 2) -> mem_2
+                                                                                                   |
+                                                         lif_fc3(mem_2)         (Linear(1, 1), abs weight, per-channel)
+                                                                                                   |
                                                                                               stage-4 LIF (slot 3)
     """
     def __init__(self, in_planes, out_planes, kernel_size, stride, padding):
         super(lif_1_1_1_1, self).__init__()
-        # 4 LIFs in serial
+        # 1 primary LIF
         self.conv_0 = nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size,
                                 stride=stride, padding=padding).to(device)
-        self.conv_1 = nn.Conv2d(out_planes, out_planes, kernel_size=kernel_size,
-                                stride=stride, padding=padding).to(device)
-        self.conv_2 = nn.Conv2d(out_planes, out_planes, kernel_size=kernel_size,
-                                stride=stride, padding=padding).to(device)
-        self.conv_3 = nn.Conv2d(out_planes, out_planes, kernel_size=kernel_size,
-                                stride=stride, padding=padding).to(device)
+        # 3 scalar mixing layers (1->1 each, non-negative, per-channel)
+        self.lif_fc1 = nn.Linear(1, 1).to(device)
+        self.lif_fc1.weight.data = abs(self.lif_fc1.weight.data)
+        self.lif_fc2 = nn.Linear(1, 1).to(device)
+        self.lif_fc2.weight.data = abs(self.lif_fc2.weight.data)
+        self.lif_fc3 = nn.Linear(1, 1).to(device)
+        self.lif_fc3.weight.data = abs(self.lif_fc3.weight.data)
 
     def forward(self, input, mem, spike, is_spike_input=True):
         """
@@ -73,7 +74,7 @@ class lif_1_1_1_1(nn.Module):
             4D [batch, C, H, W]      when is_spike_input=False
         mem, spike: 5D [batch, C', H', W', 4]
         """
-        # ---- Stage 1: 1 LIF from the input ----
+        # ---- Stage 1: 1 primary LIF from the input ----
         if is_spike_input:
             in0 = (self.conv_0(input[:,:,:,:,0])
                    + self.conv_0(input[:,:,:,:,1])
@@ -83,17 +84,18 @@ class lif_1_1_1_1(nn.Module):
             in0 = self.conv_0(input)
         mem0, spike0 = mem_update(in0, mem[:,:,:,:,0], spike[:,:,:,:,0])
 
-        # ---- Stage 2: 1 LIF from spike0 ----
-        in1 = self.conv_1(spike0)
-        mem1, spike1 = mem_update(in1, mem[:,:,:,:,1], spike[:,:,:,:,1])
+        # ---- Stage 2: 1 mixing LIF from mem_0 ----
+        # mem[:,:,:,:,0:1] is 5D [batch, C', H', W', 1]; lif_fc1 squeezes it.
+        inner1 = self.lif_fc1(mem[:,:,:,:,0:1])[..., 0]
+        mem1, spike1 = mem_update(inner1, mem[:,:,:,:,1], spike[:,:,:,:,1])
 
-        # ---- Stage 3: 1 LIF from spike1 ----
-        in2 = self.conv_2(spike1)
-        mem2, spike2 = mem_update(in2, mem[:,:,:,:,2], spike[:,:,:,:,2])
+        # ---- Stage 3: 1 mixing LIF from mem_1 ----
+        inner2 = self.lif_fc2(mem[:,:,:,:,1:2])[..., 0]
+        mem2, spike2 = mem_update(inner2, mem[:,:,:,:,2], spike[:,:,:,:,2])
 
-        # ---- Stage 4: 1 LIF from spike2 ----
-        in3 = self.conv_3(spike2)
-        mem3, spike3 = mem_update(in3, mem[:,:,:,:,3], spike[:,:,:,:,3])
+        # ---- Stage 4: 1 mixing LIF from mem_2 ----
+        inner3 = self.lif_fc3(mem[:,:,:,:,2:3])[..., 0]
+        mem3, spike3 = mem_update(inner3, mem[:,:,:,:,3], spike[:,:,:,:,3])
 
         mem_new = torch.stack([mem0, mem1, mem2, mem3], dim=-1)
         spike_new = torch.stack([spike0, spike1, spike2, spike3], dim=-1)

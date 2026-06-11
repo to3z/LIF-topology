@@ -1,22 +1,24 @@
 # -*- coding: utf-8 -*-
 """
-LIF_1_3 model: 1+3 LIF topology for multi-task learning.
+LIF_1_3 model: 1+3 LIF topology for multi-task learning (mem-mixing design,
+mirroring LIF_hh).
 
 Topology
 --------
 - Stage 1: 1 LIF processes the raw input image (slot 0)
-- Stage 2: 3 parallel LIFs each receive the stage-1 spike as their input
-  current (slots 1, 2, 3)
+- Stage 2: 3 LIFs (slots 1, 2, 3) each receive a learned linear combination
+  of the stage-1 LIF's mem via lif_fc = nn.Linear(1, 3) with non-negative
+  weights (matching LIF_hh's pattern for its single residual LIF)
 
-This is the "1 first, then 3" hierarchical variant of LIF_HH (which is 3+1):
-the same total of 4 LIFs, but a strict two-stage information flow rather than
-3 parallel + 1 residual.
+Total: 4 LIFs, same count as LIF_HH (3+1) and LIF_2_2. The "1+3" / "3+1"
+distinction is purely about which LIFs are "primary" (process input) vs
+"mixing" (integrate other LIFs' mems).
 
 Memory / spike tensor layout: [batch, out_planes, 4]
-    slot 0  -> stage-1 LIF
-    slot 1  -> stage-2 LIF (branch a)
-    slot 2  -> stage-2 LIF (branch b)
-    slot 3  -> stage-2 LIF (branch c)
+    slot 0  -> stage-1 LIF (primary)
+    slot 1  -> stage-2 LIF (mixing, output 0 of lif_fc)
+    slot 2  -> stage-2 LIF (mixing, output 1 of lif_fc)
+    slot 3  -> stage-2 LIF (mixing, output 2 of lif_fc)
 """
 import numpy as np
 import torch.nn as nn
@@ -52,51 +54,45 @@ cfg_fc = [512, 50]
 
 class lif_1_3(nn.Module):
     """
-    1+3 LIF sub-network (4 LIFs total).
+    1+3 LIF sub-network (4 LIFs total, mem-mixing, LIF_hh style).
 
     Forward flow at each timestep:
-        input -> fc_in -> stage-1 LIF (slot 0) -> spike0
-                                                  |
-                            +---------+-----------+-----------+
-                            |         |           |
-                        fc_a      fc_b         fc_c
-                            |         |           |
-                       stage-2   stage-2      stage-2
-                       LIF (1)   LIF (2)      LIF (3)
+        input -> fc_in -> stage-1 LIF (slot 0) -> mem0
+                                                       |
+                                  lif_fc(mem0)  (Linear(1, 3), abs weight)
+                                                       |
+                            +----------+--------------+
+                            |          |              |
+                       stage-2    stage-2        stage-2
+                       LIF (1)    LIF (2)        LIF (3)
+
+    The 3 stage-2 LIFs do not see `input` directly; they only see the
+    mem of the stage-1 LIF, through a small non-negative mixing matrix.
     """
     def __init__(self, in_planes, out_planes):
         super(lif_1_3, self).__init__()
-        # Stage 1: 1 LIF, projects raw input -> hidden
+        # 1 primary LIF
         self.fc_in = nn.Linear(in_planes, out_planes)
-        # Stage 2: 3 parallel LIFs, each projects stage-1 spike -> hidden
-        self.fc_a = nn.Linear(out_planes, out_planes)
-        self.fc_b = nn.Linear(out_planes, out_planes)
-        self.fc_c = nn.Linear(out_planes, out_planes)
+        # 1 mixing layer producing 3 input currents (one per stage-2 LIF)
+        self.lif_fc = nn.Linear(1, 3)
+        self.lif_fc.weight.data = abs(self.lif_fc.weight.data)
 
     def forward(self, input, mem, spike):
         # mem, spike: [batch, out_planes, 4]
-        # All operations below are out-of-place to keep autograd happy.
-        # Using torch.stack (rather than in-place slice assignment into a
-        # pre-allocated zeros tensor) avoids the "version counter mismatch"
-        # error in newer PyTorch.
+        # All out-of-place to keep autograd happy.
 
-        # ---- Stage 1: 1 LIF from the raw input ----
+        # ---- Stage 1: 1 primary LIF from the raw input ----
         in0 = self.fc_in(input)
         mem0, spike0 = mem_update(in0, mem[..., 0], spike[..., 0])
 
-        # ---- Stage 2: 3 LIFs from the stage-1 spike ----
-        # Use the freshly produced spike0 (not the previous step's spike)
-        in_a = self.fc_a(spike0)
-        in_b = self.fc_b(spike0)
-        in_c = self.fc_c(spike0)
-        mem_a, spike_a = mem_update(in_a, mem[..., 1], spike[..., 1])
-        mem_b, spike_b = mem_update(in_b, mem[..., 2], spike[..., 2])
-        mem_c, spike_c = mem_update(in_c, mem[..., 3], spike[..., 3])
+        # ---- Stage 2: 3 mixing LIFs from mem0 ----
+        inner = self.lif_fc(mem[..., 0:1])  # [batch, out_planes, 3]
+        mem_a, spike_a = mem_update(inner[..., 0], mem[..., 1], spike[..., 1])
+        mem_b, spike_b = mem_update(inner[..., 1], mem[..., 2], spike[..., 2])
+        mem_c, spike_c = mem_update(inner[..., 2], mem[..., 3], spike[..., 3])
 
-        # Build the new state via stack (no in-place writes)
         mem_new = torch.stack([mem0, mem_a, mem_b, mem_c], dim=-1)
         spike_new = torch.stack([spike0, spike_a, spike_b, spike_c], dim=-1)
-
         return mem_new, spike_new
 
 
@@ -108,7 +104,6 @@ class SNN_Model_LIF_1_3(nn.Module):
         for i in range(self.n_tasks):
             setattr(self, 'task_{}'.format(i), nn.Linear(50, 10))
 
-        # Output reads all 4 LIF slots concatenated (same as LIF_hh_fc)
         self.fc_output = nn.Linear(cfg_fc[0] * 4, cfg_fc[1])
         self.lif_4 = lif_1_3(36 * 36 * 1, cfg_fc[0])
 
@@ -122,7 +117,6 @@ class SNN_Model_LIF_1_3(nn.Module):
             h1_mem, h1_spike = self.lif_4(x, h1_mem, h1_spike)
             h1_sumspike = h1_sumspike + h1_spike
 
-        # Concat the 4 slots -> 4 * cfg_fc[0] features, then read out
         x = h1_sumspike.view(batch_size, -1)
         outs = self.fc_output(x / win)
 
