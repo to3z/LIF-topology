@@ -49,7 +49,7 @@ if __name__ == "__main__":
     parser.add_argument('--cuda',default=True, type=str2bool, help='enable cuda')
     parser.add_argument('--mode',default='train', type=str, help='train or test')
     parser.add_argument('--tensorboard',default=False, type=str2bool, help='enable tensorboard')
-    parser.add_argument('--model',default="LIF", type=str, help='LIF / HH / LIF_HH')
+    parser.add_argument('--model',default="LIF", type=str, help='LIF / HH / LIF_HH / LIF_1_3 / LIF_2_2 / LIF_1_2_1 / LIF_1_1_1_1 / LIF_ring')
     args = parser.parse_args()
 
     IZX_dict = []

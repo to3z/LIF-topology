@@ -11,6 +11,11 @@ from numbers import Number
 from model_lif import LIF_neuron
 from model_hh import HH_neuron
 from model_lif_hh import LIF_hh_neuron
+from model_lif_1_3 import LIF_1_3_neuron
+from model_lif_2_2 import LIF_2_2_neuron
+from model_lif_1_2_1 import LIF_1_2_1_neuron
+from model_lif_1_1_1_1 import LIF_1_1_1_1_neuron
+from model_lif_ring import LIF_ring_neuron
 
 class ToyNet(nn.Module):
 
@@ -19,17 +24,27 @@ class ToyNet(nn.Module):
         self.K = K
         self.model = model
         if model == "LIF":
-            self.neuron = LIF_neuron(1296,512) 
+            self.neuron = LIF_neuron(1296,512)
         elif model == "HH":
-            self.neuron = HH_neuron(1296,512) 
+            self.neuron = HH_neuron(1296,512)
         elif model == "LIF_HH":
-            self.neuron = LIF_hh_neuron(1296,512) 
-        
-        if model == "LIF" or model == "HH":
+            self.neuron = LIF_hh_neuron(1296,512)
+        elif model == "LIF_1_3":
+            self.neuron = LIF_1_3_neuron(1296,512)
+        elif model == "LIF_2_2":
+            self.neuron = LIF_2_2_neuron(1296,512)
+        elif model == "LIF_1_2_1":
+            self.neuron = LIF_1_2_1_neuron(1296,512)
+        elif model == "LIF_1_1_1_1":
+            self.neuron = LIF_1_1_1_1_neuron(1296,512)
+        elif model == "LIF_ring":
+            self.neuron = LIF_ring_neuron(1296,512)
+
+        if model in ("LIF", "HH"):
             self.encode = nn.Sequential(
                 self.neuron,
                 nn.Linear(512, 2*self.K))
-        elif model == "LIF_HH":
+        else:
             self.encode = nn.Sequential(
                 self.neuron,
                 nn.Linear(512*4, 2*self.K))

@@ -7,7 +7,6 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.optim import lr_scheduler
-from torch.utils.tensorboard import SummaryWriter
 from utils import cuda, Weight_EMA_Update
 from model import ToyNet
 from pathlib import Path
@@ -57,6 +56,7 @@ class Solver(object):
         # Tensorboard
         self.tensorboard = args.tensorboard
         if self.tensorboard :
+            from torch.utils.tensorboard import SummaryWriter
             self.env_name = args.env_name
             self.summary_dir = Path(args.summary_dir).joinpath(args.env_name)
             if not self.summary_dir.exists() : self.summary_dir.mkdir(parents=True,exist_ok=True)
