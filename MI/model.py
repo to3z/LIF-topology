@@ -11,11 +11,23 @@ from numbers import Number
 from model_lif import LIF_neuron
 from model_hh import HH_neuron
 from model_lif_hh import LIF_hh_neuron
-from model_lif_1_3 import LIF_1_3_neuron
-from model_lif_2_2 import LIF_2_2_neuron
-from model_lif_1_2_1 import LIF_1_2_1_neuron
-from model_lif_1_1_1_1 import LIF_1_1_1_1_neuron
-from model_lif_ring import LIF_ring_neuron
+from models_4LIF.model_lif_1_3 import LIF_1_3_neuron
+from models_4LIF.model_lif_2_2 import LIF_2_2_neuron
+from models_4LIF.model_lif_1_2_1 import LIF_1_2_1_neuron
+from models_4LIF.model_lif_1_1_1_1 import LIF_1_1_1_1_neuron
+from models_4LIF.model_lif_ring import LIF_ring_neuron
+from models_5LIF.model_lif_1_3_1 import LIF_1_3_1_neuron
+from models_5LIF.model_lif_1_1_3 import LIF_1_1_3_neuron
+from models_5LIF.model_lif_1_2_2 import LIF_1_2_2_neuron
+from models_5LIF.model_lif_1_1_2_1 import LIF_1_1_2_1_neuron
+from models_5LIF.model_lif_1_1_1_1_1 import LIF_1_1_1_1_1_neuron
+from models_5LIF.model_lif_1_4 import LIF_1_4_neuron
+
+# Topologies that emit a [batch, wins, channel*N] feature tensor.
+# N=1 for the single-neuron baselines (LIF, HH), N=4 for 4-LIF topologies
+# (LIF_HH and the mem-mixing variants), N=5 for 5-LIF topologies.
+_4LIF_MODELS = ("LIF_HH", "LIF_1_3", "LIF_2_2", "LIF_1_2_1", "LIF_1_1_1_1", "LIF_RING")
+_5LIF_MODELS = ("LIF_1_3_1", "LIF_1_1_3", "LIF_1_2_2", "LIF_1_1_2_1", "LIF_1_1_1_1_1", "LIF_1_4")
 
 class ToyNet(nn.Module):
 
@@ -40,19 +52,39 @@ class ToyNet(nn.Module):
             self.neuron = LIF_1_1_1_1_neuron(1296,512)
         elif self.model == "LIF_RING":
             self.neuron = LIF_ring_neuron(1296,512)
+        elif self.model == "LIF_1_3_1":
+            self.neuron = LIF_1_3_1_neuron(1296,512)
+        elif self.model == "LIF_1_1_3":
+            self.neuron = LIF_1_1_3_neuron(1296,512)
+        elif self.model == "LIF_1_2_2":
+            self.neuron = LIF_1_2_2_neuron(1296,512)
+        elif self.model == "LIF_1_1_2_1":
+            self.neuron = LIF_1_1_2_1_neuron(1296,512)
+        elif self.model == "LIF_1_1_1_1_1":
+            self.neuron = LIF_1_1_1_1_1_neuron(1296,512)
+        elif self.model == "LIF_1_4":
+            self.neuron = LIF_1_4_neuron(1296,512)
         else:
             raise ValueError(
                 "Unknown model: {!r}. Choose from: LIF, HH, LIF_HH, "
-                "LIF_1_3, LIF_2_2, LIF_1_2_1, LIF_1_1_1_1, LIF_RING".format(model))
+                "LIF_1_3, LIF_2_2, LIF_1_2_1, LIF_1_1_1_1, LIF_RING, "
+                "LIF_1_3_1, LIF_1_1_3, LIF_1_2_2, LIF_1_1_2_1, "
+                "LIF_1_1_1_1_1, LIF_1_4".format(model))
 
         if self.model in ("LIF", "HH"):
             self.encode = nn.Sequential(
                 self.neuron,
                 nn.Linear(512, 2*self.K))
-        else:
+        elif self.model in _4LIF_MODELS:
             self.encode = nn.Sequential(
                 self.neuron,
                 nn.Linear(512*4, 2*self.K))
+        elif self.model in _5LIF_MODELS:
+            self.encode = nn.Sequential(
+                self.neuron,
+                nn.Linear(512*5, 2*self.K))
+        else:
+            raise ValueError("Unknown model: {!r}".format(self.model))
         
         for i in range(2):
             setattr(self, 'task_{}'.format(i), nn.Linear(self.K, 10))
