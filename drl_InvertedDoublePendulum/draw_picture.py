@@ -6,15 +6,49 @@ import pylab as pl
 seed_dict = [0,1,2,3,4,5,6,7,8,9,10]
 need_4lif = True
 length = 300000
-total_reward_dict = {"LIF":[], "HH":[], "LIF_HH":[], "4LIF":[],"ANN":[]}
-mean_reward_dict = {"LIF":[], "HH":[], "LIF_HH":[], "4LIF":[],"ANN":[]}
-std_reward_dict = {"LIF":[], "HH":[], "LIF_HH":[], "4LIF":[],"ANN":[]}
-label_dict = {"LIF":"s-LIF", "HH":"HH", "LIF_HH":"s-LIF2HH", "4LIF":"4s-LIF","ANN":"ANN"}
+
+# 4-LIF topologies: load from record/4-LIF/
+_4LIF = ["LIF_1_3", "LIF_2_2", "LIF_1_2_1", "LIF_1_1_1_1", "LIF_ring"]
+# 5-LIF topologies: load from record/5-LIF/
+_5LIF = ["LIF_1_3_1", "LIF_1_1_3", "LIF_1_2_2", "LIF_1_1_2_1", "LIF_1_1_1_1_1", "LIF_1_4"]
+# Single-dir topologies: load from record/{model_name}/
+_OTHER = ["LIF", "HH", "LIF_HH", "4LIF", "ANN"]
+
+ALL_MODELS = _OTHER + _4LIF + _5LIF
+
+def record_subdir(model_name):
+    if model_name in _4LIF:
+        return "4-LIF"
+    if model_name in _5LIF:
+        return "5-LIF"
+    return model_name
+
+total_reward_dict = {m: [] for m in ALL_MODELS}
+mean_reward_dict = {m: [] for m in ALL_MODELS}
+std_reward_dict = {m: [] for m in ALL_MODELS}
+label_dict = {
+    "LIF": "s-LIF", "HH": "HH", "LIF_HH": "s-LIF2HH",
+    "4LIF": "4s-LIF", "ANN": "ANN",
+    "LIF_1_3": "1+3 LIF", "LIF_2_2": "2+2 LIF",
+    "LIF_1_2_1": "1+2+1 LIF", "LIF_1_1_1_1": "1+1+1+1 LIF",
+    "LIF_ring": "LIF ring",
+    "LIF_1_3_1": "1+3+1 LIF", "LIF_1_1_3": "1+1+3 LIF",
+    "LIF_1_2_2": "1+2+2 LIF", "LIF_1_1_2_1": "1+1+2+1 LIF",
+    "LIF_1_1_1_1_1": "1+1+1+1+1 LIF", "LIF_1_4": "1+4 LIF",
+}
 for seed in seed_dict:
-    for model_name in ["LIF","HH","LIF_HH","4LIF","ANN"]:
+    for model_name in ALL_MODELS:
         if model_name == "4LIF" and not need_4lif:
             continue
-        data = np.load("./record/{}/reward_iteration_{}.npy".format(model_name, seed), allow_pickle=True)
+        subdir = record_subdir(model_name)
+        # File naming: grouped subdirs use {model_name}_seed{seed} format
+        fname = "./record/{}/reward_iteration_{}_seed{}.npy".format(
+            subdir, model_name, seed)
+        # Old per-name subdirs use {seed} directly
+        if model_name in _OTHER:
+            fname = "./record/{}/reward_iteration_{}.npy".format(
+                subdir, model_name, seed)
+        data = np.load(fname, allow_pickle=True)
         data = data.tolist()
         iteration = data["iteration"]
         reward_dict = data["reward_dict"]
@@ -23,8 +57,8 @@ for seed in seed_dict:
         for i in range(iteration - n):
             avg_reward_dict[i] = np.mean(reward_dict[i:i+n])
         total_reward_dict[model_name].append(avg_reward_dict[0:length])
-        
-for model_name in ["LIF","HH","LIF_HH","4LIF","ANN"]:
+
+for model_name in ALL_MODELS:
     if(model_name == "4LIF" and not need_4lif):
         continue
     std_reward_dict[model_name] = np.std(total_reward_dict[model_name], axis=0)
@@ -32,11 +66,11 @@ for model_name in ["LIF","HH","LIF_HH","4LIF","ANN"]:
 
 iter = np.linspace(start=1, stop=length, num=length)
 color_number = 0
-color_dict = [[30,30,230],[220,180,30],[255,20,0],[80,180,100],[255,150,80]]
-for model_name in ["LIF","HH","LIF_HH","4LIF","ANN"]:
+color_dict = [[30,30,230],[220,180,30],[255,20,0],[150,80,200],[100,200,255],[255,100,200],[0,180,180],[180,100,255],[80,180,100],[255,150,80],[100,150,200],[200,100,150],[50,200,100],[150,50,200],[100,200,50]]
+for model_name in ALL_MODELS:
     if(model_name == "4LIF" and not need_4lif):
         continue
-    r,g,b = np.array(color_dict[color_number])/255
+    r,g,b = np.array(color_dict[color_number % len(color_dict)])/255
     color_number += 1
     plt.fill_between(iter, mean_reward_dict[model_name]-1*std_reward_dict[model_name],
                      mean_reward_dict[model_name]+1*std_reward_dict[model_name],
