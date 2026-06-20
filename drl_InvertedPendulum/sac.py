@@ -1,4 +1,5 @@
 import os
+import inspect
 import torch
 import torch.nn.functional as F
 from torch.optim import Adam
@@ -34,7 +35,11 @@ class SAC(object):
                 self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
                 self.alpha_optim = Adam([self.log_alpha], lr=args.lr)
 
-            self.policy = self.GaussianPolicy(num_inputs, action_space.shape[0], args.hidden_size, action_space, topk=args.topk).to(self.device)
+            # 5-LIF models accept `topk=...`; HH/ANN/4-LIF don't. Pass conditionally.
+            policy_kwargs = {}
+            if 'topk' in inspect.signature(self.GaussianPolicy).parameters:
+                policy_kwargs['topk'] = args.topk
+            self.policy = self.GaussianPolicy(num_inputs, action_space.shape[0], args.hidden_size, action_space, **policy_kwargs).to(self.device)
             self.policy_optim = Adam(self.policy.parameters(), lr=args.lr)
 
         else:
@@ -138,7 +143,7 @@ class SAC(object):
     def load_checkpoint(self, ckpt_path, evaluate=False):
         print('Loading models from {}'.format(ckpt_path))
         if ckpt_path is not None:
-            checkpoint = torch.load(ckpt_path)
+            checkpoint = torch.load(ckpt_path, map_location=self.device)
             self.policy.load_state_dict(checkpoint['policy_state_dict'])
             self.critic.load_state_dict(checkpoint['critic_state_dict'])
             self.critic_target.load_state_dict(checkpoint['critic_target_state_dict'])
@@ -160,7 +165,8 @@ class SAC(object):
                     'critic_target_state_dict': self.critic_target.state_dict()}, path)
     
     def load_model(self, path):
-        model_param = torch.load(path)
+        # map_location ensures tensors saved on a different device end up on self.device
+        model_param = torch.load(path, map_location=self.device)
         self.policy.load_state_dict(model_param['policy_state_dict'],strict=False)
         self.critic.load_state_dict(model_param['critic_state_dict'],strict=False)
         self.critic_target.load_state_dict(model_param['critic_target_state_dict'],strict=False)

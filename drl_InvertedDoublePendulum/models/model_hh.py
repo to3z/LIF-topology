@@ -66,16 +66,15 @@ class HH_neuron(nn.Module):
         self.a_h_coe =  nn.Parameter(coe_scaling * torch.rand(out_planes), requires_grad=learnable)
         self.b_h_coe =  nn.Parameter(coe_scaling * torch.rand(out_planes), requires_grad=learnable)
     
-    def zeros_state(self, size):
-        zero_state = [torch.zeros(*size).to(device)]*4
+    def zeros_state(self, size, dev):
+        zero_state = [torch.zeros(*size, device=dev)]*4
         return zero_state
 
     def update_neuron(self, inputs, states=None):
         if states is None:
-            v, y, m, h = torch.zeros_like(inputs).to(device),torch.zeros_like(inputs).to(device),torch.zeros_like(inputs).to(device),torch.zeros_like(inputs).to(device)
+            v, y, m, h = torch.zeros_like(inputs),torch.zeros_like(inputs),torch.zeros_like(inputs),torch.zeros_like(inputs)
         else:
             v, y, m, h = states
-            v, y, m, h = v.to(device), y.to(device), m.to(device), h.to(device)
 
         a_n = self.a_n_coe
         b_n = self.b_n_coe
@@ -101,8 +100,9 @@ class HH_neuron(nn.Module):
 
     def forward(self, input, wins=15):
         batch_size = input.size(0)
-        state1 = self.zeros_state([batch_size, self.oup])
-        mems = torch.zeros([batch_size, wins, self.oup]).to(device)
+        dev = input.device
+        state1 = self.zeros_state([batch_size, self.oup], dev)
+        mems = torch.zeros([batch_size, wins, self.oup], device=dev)
 
         for step in range(wins):
             state1,spike_out = self.update_neuron(self.fc(input[:,step,:]), state1)

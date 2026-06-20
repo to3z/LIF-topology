@@ -1,6 +1,7 @@
 import argparse
 import datetime
-import gym
+# import gym
+import gymnasium as gym
 import numpy as np
 import itertools
 import torch
@@ -50,11 +51,22 @@ parser.add_argument('--model_name', default="LIF_HH",
 parser.add_argument('--topk', default=5, type=int, help='top-k slots to keep for 5-LIF models (default 5 = all slots; 4 = drop the slot with the lowest total spike count per sample)')
 args = parser.parse_args()
 
+# 兼容新旧 gym / gymnasium
+def env_reset(env):
+    out = env.reset(seed=args.seed)
+    return out[0] if isinstance(out, tuple) else out
+
+def env_step(env, action):
+    out = env.step(action)
+    if len(out) == 5:
+        obs, reward, terminated, truncated, _ = out
+        return obs, reward, terminated or truncated
+    return out
+
 def train(args):
 
     # Environment
     env = gym.make(args.env_name)
-    env.seed(args.seed)
     env.action_space.seed(args.seed)
 
     torch.manual_seed(args.seed)
@@ -128,7 +140,7 @@ def train(args):
         episode_reward = 0
         episode_steps = 0
         done = False
-        state = env.reset()
+        state = env_reset(env)
         state_dict = []
         action_dict = []
         reward_dict = []
@@ -156,7 +168,7 @@ def train(args):
 
                     updates += 1
 
-            next_state, reward, done, _ = env.step(action) # Step
+            next_state, reward, done = env_step(env, action) # Step
             #print(next_state)
             design_reward = True
             if(design_reward):
@@ -216,7 +228,7 @@ def train(args):
             mask = 1 if episode_steps == env._max_episode_steps else float(not done)
             
             state_dict.append(torch.FloatTensor(state))
-            action_dict.append(torch.tensor(action))
+            action_dict.append(torch.tensor(action, dtype=torch.float32))
             reward_dict.append(torch.tensor(reward).view(1,-1))
             next_state_dict.append(torch.tensor(next_state))
             mask_dict.append(torch.tensor(mask).view(1,-1))
@@ -272,7 +284,7 @@ def train(args):
             avg_step = 0.
             episodes = 10
             for _  in range(episodes):
-                state = env.reset()
+                state = env_reset(env)
                 episode_reward = 0
                 episode_step = 0
                 done = False
@@ -289,7 +301,7 @@ def train(args):
                         for i in range(wins):
                             state_tmp[i,:,...] = state_dict_test[steps-wins+i]
                         action = agent.select_action(state_tmp, evaluate=True)  # Sample action from policy
-                    next_state, reward, done, _ = env.step(action)
+                    next_state, reward, done = env_step(env, action)
                     
                     episode_reward += reward
                     episode_step += 1

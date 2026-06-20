@@ -50,30 +50,32 @@ class LIF_hh_neuron(nn.Module):
         self.fc1 = nn.Linear(in_planes,out_planes)
         self.fc2 = nn.Linear(in_planes,out_planes)
         self.fc3 = nn.Linear(in_planes,out_planes)
-        self.lif_fc = nn.Linear(3,1).to(device)
+        self.lif_fc = nn.Linear(3,1)
         self.channel = out_planes
         self.thresh = thresh
 
     def update_neuron(self,input,mem,spike):
-        input_all = torch.zeros_like(mem)
+        dev = mem.device
+        input_all = torch.zeros_like(mem, device=dev)
         input_all[:,:,0] = self.fc1(input)
         input_all[:,:,1] = self.fc2(input)
         input_all[:,:,2] = self.fc3(input)
         inner_input = self.lif_fc(mem[:,:,0:3])
         input_all[:,:,3] = inner_input[:,:,0]
-        mem1 = torch.zeros_like(mem,device=device)
-        spike_out = torch.zeros_like(spike,device=device)
+        mem1 = torch.zeros_like(mem, device=dev)
+        spike_out = torch.zeros_like(spike, device=dev)
         mem1,spike_out = mem_update(input_all,mem,spike)
         return mem1, spike_out
 
     def forward(self, input, wins=15):
 
         batch_size = input.size(0)
+        dev = input.device
 
-        mem = torch.zeros([batch_size, self.channel, 4]).to(device)
-        spike = torch.zeros([batch_size, self.channel, 4]).to(device)
-        spikes = torch.zeros([batch_size, wins, self.channel, 4]).to(device)
-    
+        mem = torch.zeros([batch_size, self.channel, 4], device=dev)
+        spike = torch.zeros([batch_size, self.channel, 4], device=dev)
+        spikes = torch.zeros([batch_size, wins, self.channel, 4], device=dev)
+
         for step in range(wins):
             mem, spike = self.update_neuron(input[:,step,...], mem, spike)
             spikes[:,step,...] = spike
