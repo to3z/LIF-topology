@@ -53,6 +53,7 @@ parser = argparse.ArgumentParser(description='multi-task')
 parser.add_argument('--seed', default = 1, type=int, help='random seed')
 parser.add_argument('--batch_size', default = 128, type=int, help='batch size')
 parser.add_argument('--model_name',default="LIF_fc", type=str, help='LIF / HH / LIF_HH / 4LIF / LIF_1_3 / LIF_2_2 / LIF_1_2_1 / LIF_1_1_1_1 / LIF_ring / LIF_1_3_1 / LIF_1_1_3 / LIF_1_2_2 / LIF_1_1_2_1 / LIF_1_1_1_1_1 / LIF_1_4 / ANN / CNN + fc / conv')
+parser.add_argument('--topk', default=5, type=int, help='top-k slots to keep for 5-LIF_fc models (default 5 = all slots; 4 = drop the slot with the lowest total spike count per sample)')
 args = parser.parse_args()
 
 def train(data_loader, model,optimizer,scheduler,criterion):     
@@ -198,32 +199,32 @@ def main(args):
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-5)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[10, 20, 30], gamma=0.1)
     elif model_name == "LIF_1_3_1_fc":
-        model = SNN_Model_LIF_1_3_1(n_tasks)
+        model = SNN_Model_LIF_1_3_1(n_tasks, topk=args.topk)
         model.to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-5)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[10, 20, 30], gamma=0.1)
     elif model_name == "LIF_1_1_3_fc":
-        model = SNN_Model_LIF_1_1_3(n_tasks)
+        model = SNN_Model_LIF_1_1_3(n_tasks, topk=args.topk)
         model.to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-5)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[10, 20, 30], gamma=0.1)
     elif model_name == "LIF_1_2_2_fc":
-        model = SNN_Model_LIF_1_2_2(n_tasks)
+        model = SNN_Model_LIF_1_2_2(n_tasks, topk=args.topk)
         model.to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-5)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[10, 20, 30], gamma=0.1)
     elif model_name == "LIF_1_1_2_1_fc":
-        model = SNN_Model_LIF_1_1_2_1(n_tasks)
+        model = SNN_Model_LIF_1_1_2_1(n_tasks, topk=args.topk)
         model.to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-5)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[10, 20, 30], gamma=0.1)
     elif model_name == "LIF_1_1_1_1_1_fc":
-        model = SNN_Model_LIF_1_1_1_1_1(n_tasks)
+        model = SNN_Model_LIF_1_1_1_1_1(n_tasks, topk=args.topk)
         model.to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-5)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[10, 20, 30], gamma=0.1)
     elif model_name == "LIF_1_4_fc":
-        model = SNN_Model_LIF_1_4(n_tasks)
+        model = SNN_Model_LIF_1_4(n_tasks, topk=args.topk)
         model.to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-5)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[10, 20, 30], gamma=0.1)

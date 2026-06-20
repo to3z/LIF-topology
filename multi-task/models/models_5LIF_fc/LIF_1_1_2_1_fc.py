@@ -80,13 +80,14 @@ class lif_1_1_2_1(nn.Module):
 
 class SNN_Model_LIF_1_1_2_1(nn.Module):
 
-    def __init__(self, n_tasks):
+    def __init__(self, n_tasks, topk=5):
         super(SNN_Model_LIF_1_1_2_1, self).__init__()
         self.n_tasks = n_tasks
+        self.topk = topk
         for i in range(self.n_tasks):
             setattr(self, 'task_{}'.format(i), nn.Linear(50, 10))
 
-        self.fc_output = nn.Linear(cfg_fc[0] * 5, cfg_fc[1])
+        self.fc_output = nn.Linear(cfg_fc[0] * topk, cfg_fc[1])
         self.lif_5 = lif_1_1_2_1(36 * 36 * 1, cfg_fc[0])
 
     def forward(self, input, win=15):
@@ -98,6 +99,13 @@ class SNN_Model_LIF_1_1_2_1(nn.Module):
             x = input.view(batch_size, -1)
             h1_mem, h1_spike = self.lif_5(x, h1_mem, h1_spike)
             h1_sumspike = h1_sumspike + h1_spike
+
+        if self.topk < 5:
+            spike_counts = h1_sumspike.sum(dim=1)  # [batch, 5]
+            sorted_idx = torch.argsort(spike_counts, dim=1, descending=True)
+            top_idx = sorted_idx[:, :self.topk]  # [batch, topk]
+            gather_idx = top_idx.unsqueeze(1).expand(-1, cfg_fc[0], -1)  # [batch, 512, topk]
+            h1_sumspike = h1_sumspike.gather(2, gather_idx)
 
         x = h1_sumspike.view(batch_size, -1)
         outs = self.fc_output(x / win)
